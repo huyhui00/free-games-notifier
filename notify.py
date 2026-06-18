@@ -230,7 +230,7 @@ def send_discord(games):
     chunk_size = 10
     for i in range(0, len(embeds), chunk_size):
         chunk = embeds[i:i + chunk_size]
-        payload = {"content": content, "embeds": chunk}
+        payload = {"embeds": chunk}
 
         res = requests.post(WEBHOOK_URL, json=payload)
         if res.status_code in (200, 204):
