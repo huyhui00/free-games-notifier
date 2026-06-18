@@ -1,8 +1,15 @@
 import requests
 import os
+import json
+import time
+from pathlib import Path
 from datetime import datetime, timezone
 
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+NOTIFIED_FILE = Path(os.environ.get("NOTIFIED_FILE", "notified.json"))
+STATUS_FILE = Path(os.environ.get("STATUS_FILE", "status.json"))
+POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "60"))  # seconds
+RUN_ONCE = os.environ.get("RUN_ONCE", "0") == "1"
 
 # ===================== EPIC GAMES =====================
 def get_epic_free_games():
@@ -16,15 +23,40 @@ def get_epic_free_games():
             promotions = game.get("promotions")
             if not promotions:
                 continue
+
+            # Only consider current promotionalOffers (not upcomingPromotionalOffers)
             offers = promotions.get("promotionalOffers", [])
+            if not offers:
+                # nothing currently free
+                continue
+
             for offer_group in offers:
                 for offer in offer_group.get("promotionalOffers", []):
-                    if offer["discountSetting"]["discountPercentage"] == 0:
+                    # Ensure this is a free promotion (0% discount) and originally had a price > 0
+                    try:
+                        is_free_offer = offer["discountSetting"]["discountPercentage"] == 0
+                    except Exception:
+                        is_free_offer = False
+                    if not is_free_offer:
+                        continue
+
+                    # check original price numeric
+                    price_info = game.get("price", {}).get("totalPrice", {})
+                    original_price_value = price_info.get("originalPrice")
+                    try:
+                        if original_price_value is None:
+                            # if missing, treat as skip (avoid free-to-play/permanent free)
+                            continue
+                        if float(original_price_value) <= 0:
+                            # permanently free or free-to-play, skip
+                            continue
+                    except Exception:
+                        continue
                         title = game["title"]
                         slug = game.get("productSlug") or game.get("urlSlug", "")
                         url_game = f"https://store.epicgames.com/th/p/{slug}"
 
-                        # ราคาปกติ
+                        # ราคาปกติ (formatted)
                         price_info = game.get("price", {}).get("totalPrice", {})
                         original_price = price_info.get("fmtOriginalPrice", "N/A")
 
@@ -100,13 +132,30 @@ def get_steam_free_games():
                 detail_data = detail_res.json().get(str(appid), {}).get("data", {})
                 if detail_data:
                     price_overview = detail_data.get("price_overview", {})
+                    # Determine if this is a temporary free promotion: final == 0 and initial > 0
+                    initial = price_overview.get("initial") if price_overview else None
+                    final = price_overview.get("final") if price_overview else None
+
+                    is_temporary_free = False
+                    try:
+                        if final is not None and initial is not None:
+                            # Steam prices are in cents; check numeric
+                            if int(final) == 0 and int(initial) > 0:
+                                is_temporary_free = True
+                    except Exception:
+                        is_temporary_free = False
+
+                    if not is_temporary_free:
+                        # skip discounts or permanently free items
+                        continue
+
                     if price_overview:
                         original_price = price_overview.get("initial_formatted", "N/A")
                     description = detail_data.get("short_description", "")[:200]
                     tags = [g.get("description", "") for g in detail_data.get("genres", [])][:3]
 
-                    # วันสิ้นสุด sale
-                    sale_end = detail_data.get("price_overview", {}).get("discount_deadline_date", "")
+                    # sale end (if provided)
+                    sale_end = price_overview.get("discount_deadline_date", "") if price_overview else ""
                     if sale_end:
                         try:
                             dt = datetime.fromtimestamp(int(sale_end), tz=timezone.utc)
@@ -145,6 +194,36 @@ def get_steam_free_games():
     except Exception as e:
         print(f"Steam error: {e}")
         return []
+
+
+def load_json(path: Path):
+    try:
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def save_json(path: Path, data):
+    try:
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception as e:
+        print(f"Error writing {path}: {e}")
+
+
+def get_game_id(game: dict):
+    # Generate a stable id per platform
+    if game.get("source") == "Epic Games":
+        # use slug or title+end_date
+        slug = game.get("url", "").rstrip("/").split("/p/")[-1]
+        if slug:
+            return f"epic:{slug}"
+        return f"epic:{game.get('title','')}-{game.get('end_date','') }"
+    if game.get("source") == "Steam":
+        appid = game.get("appid") or game.get("url", "").split("/app/")[-1]
+        return f"steam:{appid}"
+    return f"other:{game.get('title','')}-{game.get('url','') }"
 
 # ===================== DISCORD =====================
 def build_embed(game):
@@ -239,11 +318,69 @@ def send_discord(games):
             print(f"ส่งไม่สำเร็จ: {res.status_code} {res.text}")
 
 
+def send_discord_message(text: str):
+    if not text:
+        return
+    try:
+        res = requests.post(WEBHOOK_URL, json={"content": text})
+        if res.status_code in (200, 204):
+            print("ส่งข้อความสถานะสำเร็จ")
+        else:
+            print(f"ส่งข้อความสถานะไม่สำเร็จ: {res.status_code} {res.text}")
+    except Exception as e:
+        print(f"Error sending status message: {e}")
+
+
 # ===================== MAIN =====================
 if __name__ == "__main__":
-    print("กำลังตรวจสอบเกมฟรี...")
-    epic = get_epic_free_games()
-    steam = get_steam_free_games()
-    all_games = epic + steam
-    print(f"พบ Epic: {len(epic)} เกม, Steam: {len(steam)} เกม")
-    send_discord(all_games)
+    print("เริ่ม bot แจ้งเตือนเกมฟรี (polling)...")
+
+    notified = load_json(NOTIFIED_FILE) or {"ids": []}
+    if "ids" not in notified:
+        notified = {"ids": []}
+
+    last_status = load_json(STATUS_FILE) or {}
+
+    while True:
+        print(f"[{datetime.now().isoformat()}] ตรวจสอบเกมฟรี...")
+        epic = get_epic_free_games()
+        steam = get_steam_free_games()
+        all_games = epic + steam
+        print(f"พบ Epic: {len(epic)} เกม, Steam: {len(steam)} เกม")
+
+        # identify new games
+        new_games = []
+        for g in all_games:
+            gid = get_game_id(g)
+            if gid not in notified.get("ids", []):
+                new_games.append(g)
+                notified.setdefault("ids", []).append(gid)
+
+        # send new game notifications
+        if new_games:
+            print(f"ส่งแจ้งเตือนเกมใหม่: {len(new_games)}")
+            send_discord(new_games)
+            save_json(NOTIFIED_FILE, notified)
+
+        # platform status: which platforms currently have no freebies
+        platform_has = {
+            "Epic Games": len(epic) > 0,
+            "Steam": len(steam) > 0,
+        }
+
+        # if status changed, send a short message indicating platforms with no freebies
+        if platform_has != last_status:
+            no_free = [p for p, has in platform_has.items() if not has]
+            if no_free:
+                txt = "สถานะแจกฟรีตอนนี้: " + ", ".join(no_free) + " ยังไม่มีการแจก"
+            else:
+                txt = "สถานะแจกฟรีตอนนี้: ทุกแพลตฟอร์มมีการแจกหรือไม่มีรายการว่างตอนนี้"
+            send_discord_message(txt)
+            last_status = platform_has
+            save_json(STATUS_FILE, last_status)
+
+        if RUN_ONCE:
+            print("รันแบบครั้งเดียวเสร็จสิ้น")
+            break
+
+        time.sleep(POLL_INTERVAL)
