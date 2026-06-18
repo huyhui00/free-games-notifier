@@ -1,4 +1,3 @@
-cat > /mnt/user-data/outputs/freegames_huyhui.py << 'EOF'
 import requests
 import os
 from datetime import datetime, timezone
