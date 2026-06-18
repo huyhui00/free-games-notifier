@@ -230,7 +230,6 @@ def send_discord(games):
     chunk_size = 10
     for i in range(0, len(embeds), chunk_size):
         chunk = embeds[i:i + chunk_size]
-        content = "## 🎁 เกมฟรีประจำสัปดาห์มาแล้ว!" if i == 0 else ""
         payload = {"content": content, "embeds": chunk}
 
         res = requests.post(WEBHOOK_URL, json=payload)
