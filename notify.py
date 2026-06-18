@@ -418,24 +418,28 @@ def send_status_embed(platform_has: dict):
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-        # If no platform has freebies and a local status image exists, attach it as the embed image
+        # If no platform has freebies and a local status image exists, try to attach it.
         try:
             local_img = Path("images/main.png")
             if not (epic_has or steam_has) and local_img.exists():
-                # We can't upload local files via webhook embed directly; instead host via raw GitHub URL if in repo
-                # Build GitHub raw URL based on repository path if available (best-effort)
-                # Fallback: use relative path only — some webhook consumers support attachments, but Discord does not for local files.
-                # So attempt to use GitHub raw URL assuming repository is hosted at github.com and file is at this path.
-                # Try to infer repo from environment (GITHUB_REPOSITORY)
-                repo = os.environ.get("GITHUB_REPOSITORY")
-                if repo:
-                    raw_url = f"https://raw.githubusercontent.com/{repo}/main/{local_img.as_posix()}"
-                    embed["image"] = {"url": raw_url}
-                else:
-                    # No repo info; still set image to local path (may not render in Discord)
-                    embed["image"] = {"url": local_img.as_posix()}
-                if DEBUG:
-                    print(f"[STATUS IMAGE] using {local_img}")
+                # Prepare embed to reference the attachment
+                embed["image"] = {"url": f"attachment://{local_img.name}"}
+
+                # Send as multipart/form-data with payload_json + file attachment (Discord supports this)
+                try:
+                    with open(local_img, "rb") as f:
+                        files = {"file": (local_img.name, f, "application/octet-stream")}
+                        payload = {"payload_json": json.dumps({"embeds": [embed]})}
+                        r = requests.post(WEBHOOK_URL, data=payload, files=files)
+                        if r.status_code in (200, 204):
+                            print("ส่งสถานะแบบ embed พร้อมรูปแนบสำเร็จ")
+                            return
+                        else:
+                            print(f"ส่งสถานะพร้อมรูปไม่สำเร็จ: {r.status_code} {r.text}")
+                except Exception as e:
+                    if DEBUG:
+                        print(f"Error sending attachment: {e}")
+                    # fall through to normal embed/json post below
         except Exception:
             pass
 
