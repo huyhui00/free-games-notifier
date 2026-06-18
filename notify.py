@@ -10,6 +10,8 @@ NOTIFIED_FILE = Path(os.environ.get("NOTIFIED_FILE", "notified.json"))
 STATUS_FILE = Path(os.environ.get("STATUS_FILE", "status.json"))
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "60"))  # seconds
 RUN_ONCE = os.environ.get("RUN_ONCE", "0") == "1"
+DEBUG = os.environ.get("DEBUG", "0") == "1"
+NOTIFY_UPCOMING = os.environ.get("NOTIFY_UPCOMING", "0") == "1"
 
 # ===================== EPIC GAMES =====================
 def get_epic_free_games():
@@ -22,12 +24,56 @@ def get_epic_free_games():
         for game in games:
             promotions = game.get("promotions")
             if not promotions:
+                if DEBUG:
+                    print(f"[EPIC SKIP] no promotions for {game.get('title')}")
                 continue
 
             # Only consider current promotionalOffers (not upcomingPromotionalOffers)
             offers = promotions.get("promotionalOffers", [])
             if not offers:
                 # nothing currently free
+                if DEBUG:
+                    print(f"[EPIC SKIP] no current promotionalOffers for {game.get('title')}")
+                # optionally check upcoming promotions
+                if NOTIFY_UPCOMING:
+                    upcoming = promotions.get("upcomingPromotionalOffers", [])
+                    for ug in upcoming:
+                        for uoffer in ug.get("promotionalOffers", []) or []:
+                            try:
+                                if uoffer.get("discountSetting", {}).get("discountPercentage") == 0:
+                                    # create an upcoming entry (notify as "starts soon")
+                                    start_date = uoffer.get("startDate", "")
+                                    try:
+                                        sdt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+                                        start_date_fmt = sdt.strftime("%d/%m/%Y %H:%M UTC")
+                                    except Exception:
+                                        start_date_fmt = start_date
+
+                                    title = game.get("title")
+                                    slug = game.get("productSlug") or game.get("urlSlug", "")
+                                    url_game = f"https://store.epicgames.com/th/p/{slug}"
+                                    image_url = ""
+                                    for img in game.get("keyImages", []):
+                                        if img.get("type") in ("Thumbnail", "DieselStoreFrontWide", "OfferImageWide"):
+                                            image_url = img.get("url", "")
+                                            break
+                                    free_games.append({
+                                        "title": title + " (เริ่มเร็วๆ นี้)",
+                                        "url": url_game,
+                                        "source": "Epic Games",
+                                        "original_price": game.get("price", {}).get("totalPrice", {}).get("fmtOriginalPrice", "N/A"),
+                                        "end_date": uoffer.get("endDate", ""),
+                                        "image_url": image_url,
+                                        "tags": [t.get("name", "") for t in game.get("tags", [])][:3],
+                                        "description": game.get("description", "")[:200],
+                                        "store_url": url_game,
+                                    })
+                                    if DEBUG:
+                                        print(f"[EPIC UPCOMING] will notify upcoming free for {title} starting {start_date_fmt}")
+                                    # don't continue outer loop here; we added upcoming entry
+                                    break
+                            except Exception:
+                                pass
                 continue
 
             for offer_group in offers:
@@ -37,7 +83,10 @@ def get_epic_free_games():
                         is_free_offer = offer["discountSetting"]["discountPercentage"] == 0
                     except Exception:
                         is_free_offer = False
+
                     if not is_free_offer:
+                        if DEBUG:
+                            print(f"[EPIC SKIP] not free offer for {game.get('title')}")
                         continue
 
                     # check original price numeric
@@ -46,11 +95,17 @@ def get_epic_free_games():
                     try:
                         if original_price_value is None:
                             # if missing, treat as skip (avoid free-to-play/permanent free)
+                            if DEBUG:
+                                print(f"[EPIC SKIP] missing original price for {game.get('title')}")
                             continue
                         if float(original_price_value) <= 0:
                             # permanently free or free-to-play, skip
+                            if DEBUG:
+                                print(f"[EPIC SKIP] original price <=0 for {game.get('title')}")
                             continue
                     except Exception:
+                        if DEBUG:
+                            print(f"[EPIC SKIP] price parse error for {game.get('title')}")
                         continue
                         title = game["title"]
                         slug = game.get("productSlug") or game.get("urlSlug", "")
@@ -145,9 +200,19 @@ def get_steam_free_games():
                     except Exception:
                         is_temporary_free = False
 
+                    # If price_overview is missing (initial/final None), but the item came from a
+                    # search filtered with maxprice=free, accept it as temporary free (fallback)
                     if not is_temporary_free:
-                        # skip discounts or permanently free items
-                        continue
+                        if not price_overview:
+                            # fallback to accept based on search result
+                            is_temporary_free = True
+                            if DEBUG:
+                                print(f"[STEAM Fallback] accepting based on search for appid {appid} ({name})")
+                        else:
+                            # skip discounts or permanently free items
+                            if DEBUG:
+                                print(f"[STEAM SKIP] not temporary free for appid {appid} ({name}) initial={initial} final={final})")
+                            continue
 
                     if price_overview:
                         original_price = price_overview.get("initial_formatted", "N/A")
@@ -331,6 +396,69 @@ def send_discord_message(text: str):
         print(f"Error sending status message: {e}")
 
 
+def send_status_embed(platform_has: dict):
+    # Build a friendly embed summarizing which platforms currently have freebies
+    try:
+        icons = {True: "✅", False: "❌"}
+        epic_has = platform_has.get("Epic Games", False)
+        steam_has = platform_has.get("Steam", False)
+
+        # color: green if any free, grey otherwise
+        color = 0x1D9E75 if (epic_has or steam_has) else 0x95A5A6
+
+        fields = []
+        fields.append({
+            "name": "Epic Games",
+            "value": f"{icons[epic_has]}  {'มีการแจกตอนนี้' if epic_has else 'ยังไม่มีการแจก'}",
+            "inline": True,
+        })
+        fields.append({
+            "name": "Steam",
+            "value": f"{icons[steam_has]}  {'มีการแจกตอนนี้' if steam_has else 'ยังไม่มีการแจก'}",
+            "inline": True,
+        })
+
+        description = (
+            "ตรวจสอบแพลตฟอร์มยอดนิยม เพื่อค้นหาเกมที่แจกฟรีชั่วคราว (no sales)\n"
+            "- ระบบจะไม่แจ้งเกมที่แจกไปแล้วก่อนหน้า\n"
+            "- จะแจ้งเฉพาะโปรโมชั่นที่เป็นการให้โหลดฟรีชั่วคราวเท่านั้น\n"
+        )
+
+        embed = {
+            "title": "สถานะการแจกเกมฟรี",
+            "description": description,
+            "color": color,
+            "fields": fields,
+            "thumbnail": {"url": "https://i.imgur.com/7XKQ6mY.png"},
+            "footer": {"text": "Free Games Notifier • จะส่งเฉพาะ Free promotions"},
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # Add small platform icons as author icons (Epic left, Steam right cannot both be author)
+        # We'll include a thumbnail and leave per-field icons in text
+
+        res = requests.post(WEBHOOK_URL, json={"embeds": [embed]}, headers={"Content-Type": "application/json"})
+        if res.status_code in (200, 204):
+            print("ส่งสถานะแบบ embed สำเร็จ")
+            return
+        print(f"ส่งสถานะแบบ embed ไม่สำเร็จ: {res.status_code} {res.text}")
+
+        # Fallback: try sending plain text message instead
+        try:
+            fallback = "สถานะการแจกเกมฟรี: " + "; ".join(
+                f"{p}: {'มี' if has else 'ไม่มี'}" for p, has in platform_has.items()
+            )
+            r2 = requests.post(WEBHOOK_URL, json={"content": fallback}, headers={"Content-Type": "application/json"})
+            if r2.status_code in (200, 204):
+                print("ส่งสถานะแบบข้อความสำเร็จ (fallback)")
+            else:
+                print(f"Fallback ส่งไม่สำเร็จ: {r2.status_code} {r2.text}")
+        except Exception as e:
+            print(f"Fallback error: {e}")
+    except Exception as e:
+        print(f"Error sending status embed: {e}")
+
+
 # ===================== MAIN =====================
 if __name__ == "__main__":
     print("เริ่ม bot แจ้งเตือนเกมฟรี (polling)...")
@@ -370,12 +498,7 @@ if __name__ == "__main__":
 
         # if status changed, send a short message indicating platforms with no freebies
         if platform_has != last_status:
-            no_free = [p for p, has in platform_has.items() if not has]
-            if no_free:
-                txt = "สถานะแจกฟรีตอนนี้: " + ", ".join(no_free) + " ยังไม่มีการแจก"
-            else:
-                txt = "สถานะแจกฟรีตอนนี้: ทุกแพลตฟอร์มมีการแจกหรือไม่มีรายการว่างตอนนี้"
-            send_discord_message(txt)
+            send_status_embed(platform_has)
             last_status = platform_has
             save_json(STATUS_FILE, last_status)
 
