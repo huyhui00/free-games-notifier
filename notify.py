@@ -72,6 +72,7 @@ def get_epic_free_games():
                                         "tags": [t.get("name", "") for t in game.get("tags", [])][:3],
                                         "description": game.get("description", "")[:200],
                                         "store_url": url_game,
+                                        "start_date": start_date,  # ISO format for dedup
                                     })
                                     if DEBUG:
                                         print(f"[EPIC UPCOMING] will notify upcoming free for {title} starting {start_date_fmt}")
@@ -150,6 +151,7 @@ def get_epic_free_games():
                             "tags": tags,
                             "description": game.get("description", "")[:200],
                             "store_url": url_game,
+                            "start_date": offer.get("startDate", ""),  # ISO format for dedup
                         })
         return free_games
     except Exception as e:
@@ -283,16 +285,27 @@ def save_json(path: Path, data):
 
 
 def get_game_id(game: dict):
-    # Generate a stable id per platform
+    # Generate a stable promotion ID (track by game + specific promotion period)
     if game.get("source") == "Epic Games":
-        # use slug or title+end_date
+        # Epic: use slug + startDate to track each promotion separately
+        # Different promotions of same game = different startDate = different ID
         slug = game.get("url", "").rstrip("/").split("/p/")[-1]
+        # Remove trailing /home or /content
+        slug = slug.rstrip("/").split("/")[0] if slug else ""
+        start_date = game.get("start_date", "")  # ISO format from API
+        if slug and start_date:
+            # Compact start date: 2026-06-18T15:00:00.000Z -> 20260618
+            start_compact = start_date[:10].replace("-", "")
+            return f"epic:{slug}:{start_compact}"
         if slug:
             return f"epic:{slug}"
         return f"epic:{game.get('title','')}-{game.get('end_date','') }"
+    
     if game.get("source") == "Steam":
+        # Steam: use appid only (no reliable promotion period API)
         appid = game.get("appid") or game.get("url", "").split("/app/")[-1]
         return f"steam:{appid}"
+    
     return f"other:{game.get('title','')}-{game.get('url','') }"
 
 # ===================== DISCORD =====================
