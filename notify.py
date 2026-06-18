@@ -399,43 +399,45 @@ def send_discord_message(text: str):
 def send_status_embed(platform_has: dict):
     # Build a friendly embed summarizing which platforms currently have freebies
     try:
+        # Minimal embed: one clean field per platform showing only status
         icons = {True: "✅", False: "❌"}
         epic_has = platform_has.get("Epic Games", False)
         steam_has = platform_has.get("Steam", False)
 
-        # color: green if any free, grey otherwise
         color = 0x1D9E75 if (epic_has or steam_has) else 0x95A5A6
-
-        fields = []
-        fields.append({
-            "name": "Epic Games",
-            "value": f"{icons[epic_has]}  {'มีการแจกตอนนี้' if epic_has else 'ยังไม่มีการแจก'}",
-            "inline": True,
-        })
-        fields.append({
-            "name": "Steam",
-            "value": f"{icons[steam_has]}  {'มีการแจกตอนนี้' if steam_has else 'ยังไม่มีการแจก'}",
-            "inline": True,
-        })
-
-        description = (
-            "ตรวจสอบแพลตฟอร์มยอดนิยม เพื่อค้นหาเกมที่แจกฟรีชั่วคราว (no sales)\n"
-            "- ระบบจะไม่แจ้งเกมที่แจกไปแล้วก่อนหน้า\n"
-            "- จะแจ้งเฉพาะโปรโมชั่นที่เป็นการให้โหลดฟรีชั่วคราวเท่านั้น\n"
-        )
 
         embed = {
             "title": "สถานะการแจกเกมฟรี",
-            "description": description,
+            "description": "แพลตฟอร์มไหนมีแจกหรือไม่ — ดูสรุปสั้น ๆ ด้านล่าง",
             "color": color,
-            "fields": fields,
-            "thumbnail": {"url": "https://i.imgur.com/7XKQ6mY.png"},
-            "footer": {"text": "Free Games Notifier • จะส่งเฉพาะ Free promotions"},
+            "fields": [
+                {"name": "Epic Games", "value": f"{icons[epic_has]} {'มีแจก' if epic_has else 'ยังไม่มีแจก'}", "inline": True},
+                {"name": "Steam", "value": f"{icons[steam_has]} {'มีแจก' if steam_has else 'ยังไม่มีแจก'}", "inline": True},
+            ],
+            "footer": {"text": "Free Games Notifier"},
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-        # Add small platform icons as author icons (Epic left, Steam right cannot both be author)
-        # We'll include a thumbnail and leave per-field icons in text
+        # If no platform has freebies and a local status image exists, attach it as the embed image
+        try:
+            local_img = Path("images/main.png")
+            if not (epic_has or steam_has) and local_img.exists():
+                # We can't upload local files via webhook embed directly; instead host via raw GitHub URL if in repo
+                # Build GitHub raw URL based on repository path if available (best-effort)
+                # Fallback: use relative path only — some webhook consumers support attachments, but Discord does not for local files.
+                # So attempt to use GitHub raw URL assuming repository is hosted at github.com and file is at this path.
+                # Try to infer repo from environment (GITHUB_REPOSITORY)
+                repo = os.environ.get("GITHUB_REPOSITORY")
+                if repo:
+                    raw_url = f"https://raw.githubusercontent.com/{repo}/main/{local_img.as_posix()}"
+                    embed["image"] = {"url": raw_url}
+                else:
+                    # No repo info; still set image to local path (may not render in Discord)
+                    embed["image"] = {"url": local_img.as_posix()}
+                if DEBUG:
+                    print(f"[STATUS IMAGE] using {local_img}")
+        except Exception:
+            pass
 
         res = requests.post(WEBHOOK_URL, json={"embeds": [embed]}, headers={"Content-Type": "application/json"})
         if res.status_code in (200, 204):
@@ -443,11 +445,9 @@ def send_status_embed(platform_has: dict):
             return
         print(f"ส่งสถานะแบบ embed ไม่สำเร็จ: {res.status_code} {res.text}")
 
-        # Fallback: try sending plain text message instead
+        # Fallback to very simple plain text
         try:
-            fallback = "สถานะการแจกเกมฟรี: " + "; ".join(
-                f"{p}: {'มี' if has else 'ไม่มี'}" for p, has in platform_has.items()
-            )
+            fallback = " | ".join(f"{p}: {'มี' if has else 'ไม่มี'}" for p, has in platform_has.items())
             r2 = requests.post(WEBHOOK_URL, json={"content": fallback}, headers={"Content-Type": "application/json"})
             if r2.status_code in (200, 204):
                 print("ส่งสถานะแบบข้อความสำเร็จ (fallback)")
