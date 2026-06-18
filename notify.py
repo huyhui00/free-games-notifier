@@ -248,5 +248,3 @@ if __name__ == "__main__":
     all_games = epic + steam
     print(f"พบ Epic: {len(epic)} เกม, Steam: {len(steam)} เกม")
     send_discord(all_games)
-EOF
-echo "done"
