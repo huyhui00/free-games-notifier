@@ -1,5 +1,6 @@
 import requests
 import os
+import sys
 import json
 import time
 from pathlib import Path
@@ -12,6 +13,10 @@ POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "60"))  # seconds
 RUN_ONCE = os.environ.get("RUN_ONCE", "0") == "1"
 DEBUG = os.environ.get("DEBUG", "0") == "1"
 NOTIFY_UPCOMING = os.environ.get("NOTIFY_UPCOMING", "0") == "1"
+
+if not WEBHOOK_URL:
+    print("Error: DISCORD_WEBHOOK_URL environment variable is not set.\nSet it and re-run, e.g. in PowerShell:\n$env:DISCORD_WEBHOOK_URL=\"https://discord.com/api/webhooks/...\"\n")
+    sys.exit(1)
 
 # ===================== EPIC GAMES =====================
 def get_epic_free_games():
