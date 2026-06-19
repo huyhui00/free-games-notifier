@@ -36,7 +36,6 @@ def get_epic_free_games():
             # Only consider current promotionalOffers (not upcomingPromotionalOffers)
             offers = promotions.get("promotionalOffers", [])
             if not offers:
-                # nothing currently free
                 if DEBUG:
                     print(f"[EPIC SKIP] no current promotionalOffers for {game.get('title')}")
                 # optionally check upcoming promotions
@@ -46,7 +45,6 @@ def get_epic_free_games():
                         for uoffer in ug.get("promotionalOffers", []) or []:
                             try:
                                 if uoffer.get("discountSetting", {}).get("discountPercentage") == 0:
-                                    # create an upcoming entry (notify as "starts soon")
                                     start_date = uoffer.get("startDate", "")
                                     try:
                                         sdt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
@@ -72,11 +70,10 @@ def get_epic_free_games():
                                         "tags": [t.get("name", "") for t in game.get("tags", [])][:3],
                                         "description": game.get("description", "")[:200],
                                         "store_url": url_game,
-                                        "start_date": start_date,  # ISO format for dedup
+                                        "start_date": start_date,
                                     })
                                     if DEBUG:
                                         print(f"[EPIC UPCOMING] will notify upcoming free for {title} starting {start_date_fmt}")
-                                    # don't continue outer loop here; we added upcoming entry
                                     break
                             except Exception:
                                 pass
@@ -84,7 +81,7 @@ def get_epic_free_games():
 
             for offer_group in offers:
                 for offer in offer_group.get("promotionalOffers", []):
-                    # Ensure this is a free promotion (0% discount) and originally had a price > 0
+                    # Ensure this is a free promotion (0% discount)
                     try:
                         is_free_offer = offer["discountSetting"]["discountPercentage"] == 0
                     except Exception:
@@ -95,17 +92,15 @@ def get_epic_free_games():
                             print(f"[EPIC SKIP] not free offer for {game.get('title')}")
                         continue
 
-                    # check original price numeric
+                    # Check original price numeric (skip permanently free / F2P)
                     price_info = game.get("price", {}).get("totalPrice", {})
                     original_price_value = price_info.get("originalPrice")
                     try:
                         if original_price_value is None:
-                            # if missing, treat as skip (avoid free-to-play/permanent free)
                             if DEBUG:
                                 print(f"[EPIC SKIP] missing original price for {game.get('title')}")
                             continue
                         if float(original_price_value) <= 0:
-                            # permanently free or free-to-play, skip
                             if DEBUG:
                                 print(f"[EPIC SKIP] original price <=0 for {game.get('title')}")
                             continue
@@ -113,46 +108,48 @@ def get_epic_free_games():
                         if DEBUG:
                             print(f"[EPIC SKIP] price parse error for {game.get('title')}")
                         continue
-                        title = game["title"]
-                        slug = game.get("productSlug") or game.get("urlSlug", "")
-                        url_game = f"https://store.epicgames.com/th/p/{slug}"
 
-                        # ราคาปกติ (formatted)
-                        price_info = game.get("price", {}).get("totalPrice", {})
-                        original_price = price_info.get("fmtOriginalPrice", "N/A")
+                    # === BUG FIX: this block was inside except, now correctly outside ===
+                    title = game["title"]
+                    slug = game.get("productSlug") or game.get("urlSlug", "")
+                    url_game = f"https://store.epicgames.com/th/p/{slug}"
 
-                        # วันหมดโปรโมชัน
-                        end_date_str = offer.get("endDate", "")
-                        end_date = ""
-                        if end_date_str:
-                            try:
-                                dt = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
-                                end_date = dt.strftime("%d/%m/%Y")
-                            except:
-                                end_date = end_date_str[:10]
+                    # ราคาปกติ (formatted)
+                    original_price = price_info.get("fmtOriginalPrice", "N/A")
 
-                        # รูป key art
-                        image_url = ""
-                        for img in game.get("keyImages", []):
-                            if img.get("type") in ("Thumbnail", "DieselStoreFrontWide", "OfferImageWide"):
-                                image_url = img.get("url", "")
-                                break
+                    # วันหมดโปรโมชัน
+                    end_date_str = offer.get("endDate", "")
+                    end_date = ""
+                    if end_date_str:
+                        try:
+                            dt = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+                            end_date = dt.strftime("%d/%m/%Y")
+                        except Exception:
+                            end_date = end_date_str[:10]
 
-                        # แท็กหมวดหมู่
-                        tags = [t.get("name", "") for t in game.get("tags", []) if t.get("name")][:3]
+                    # รูป key art
+                    image_url = ""
+                    for img in game.get("keyImages", []):
+                        if img.get("type") in ("Thumbnail", "DieselStoreFrontWide", "OfferImageWide"):
+                            image_url = img.get("url", "")
+                            break
 
-                        free_games.append({
-                            "title": title,
-                            "url": url_game,
-                            "source": "Epic Games",
-                            "original_price": original_price,
-                            "end_date": end_date,
-                            "image_url": image_url,
-                            "tags": tags,
-                            "description": game.get("description", "")[:200],
-                            "store_url": url_game,
-                            "start_date": offer.get("startDate", ""),  # ISO format for dedup
-                        })
+                    # แท็กหมวดหมู่
+                    tags = [t.get("name", "") for t in game.get("tags", []) if t.get("name")][:3]
+
+                    free_games.append({
+                        "title": title,
+                        "url": url_game,
+                        "source": "Epic Games",
+                        "original_price": original_price,
+                        "end_date": end_date,
+                        "image_url": image_url,
+                        "tags": tags,
+                        "description": game.get("description", "")[:200],
+                        "store_url": url_game,
+                        "start_date": offer.get("startDate", ""),
+                    })
+
         return free_games
     except Exception as e:
         print(f"Epic error: {e}")
@@ -178,7 +175,6 @@ def get_steam_free_games():
             store_url = f"https://store.steampowered.com/app/{appid}"
             steam_url = f"steam://store/{appid}"
 
-            # ดึงข้อมูลเพิ่มเติมจาก Steam API
             original_price = "N/A"
             description = ""
             image_url = f"https://cdn.cloudflare.steamstatic.com/steam/apps/{appid}/header.jpg"
@@ -194,29 +190,23 @@ def get_steam_free_games():
                 detail_data = detail_res.json().get(str(appid), {}).get("data", {})
                 if detail_data:
                     price_overview = detail_data.get("price_overview", {})
-                    # Determine if this is a temporary free promotion: final == 0 and initial > 0
                     initial = price_overview.get("initial") if price_overview else None
                     final = price_overview.get("final") if price_overview else None
 
                     is_temporary_free = False
                     try:
                         if final is not None and initial is not None:
-                            # Steam prices are in cents; check numeric
                             if int(final) == 0 and int(initial) > 0:
                                 is_temporary_free = True
                     except Exception:
                         is_temporary_free = False
 
-                    # If price_overview is missing (initial/final None), but the item came from a
-                    # search filtered with maxprice=free, accept it as temporary free (fallback)
                     if not is_temporary_free:
                         if not price_overview:
-                            # fallback to accept based on search result
                             is_temporary_free = True
                             if DEBUG:
                                 print(f"[STEAM Fallback] accepting based on search for appid {appid} ({name})")
                         else:
-                            # skip discounts or permanently free items
                             if DEBUG:
                                 print(f"[STEAM SKIP] not temporary free for appid {appid} ({name}) initial={initial} final={final})")
                             continue
@@ -226,16 +216,14 @@ def get_steam_free_games():
                     description = detail_data.get("short_description", "")[:200]
                     tags = [g.get("description", "") for g in detail_data.get("genres", [])][:3]
 
-                    # sale end (if provided)
                     sale_end = price_overview.get("discount_deadline_date", "") if price_overview else ""
                     if sale_end:
                         try:
                             dt = datetime.fromtimestamp(int(sale_end), tz=timezone.utc)
                             end_date = dt.strftime("%d/%m/%Y")
-                        except:
+                        except Exception:
                             pass
 
-                # Steam review score
                 review_res = requests.get(
                     f"https://store.steampowered.com/appreviews/{appid}?json=1&language=all",
                     timeout=5
@@ -285,40 +273,32 @@ def save_json(path: Path, data):
 
 
 def get_game_id(game: dict):
-    # Generate a stable promotion ID (track by game + specific promotion period)
     if game.get("source") == "Epic Games":
-        # Epic: use slug + startDate to track each promotion separately
-        # Different promotions of same game = different startDate = different ID
         slug = game.get("url", "").rstrip("/").split("/p/")[-1]
-        # Remove trailing /home or /content
         slug = slug.rstrip("/").split("/")[0] if slug else ""
-        start_date = game.get("start_date", "")  # ISO format from API
+        start_date = game.get("start_date", "")
         if slug and start_date:
-            # Compact start date: 2026-06-18T15:00:00.000Z -> 20260618
             start_compact = start_date[:10].replace("-", "")
             return f"epic:{slug}:{start_compact}"
         if slug:
             return f"epic:{slug}"
-        return f"epic:{game.get('title','')}-{game.get('end_date','') }"
-    
+        return f"epic:{game.get('title','')}-{game.get('end_date','')}"
+
     if game.get("source") == "Steam":
-        # Steam: use appid only (no reliable promotion period API)
         appid = game.get("appid") or game.get("url", "").split("/app/")[-1]
         return f"steam:{appid}"
-    
-    return f"other:{game.get('title','')}-{game.get('url','') }"
+
+    return f"other:{game.get('title','')}-{game.get('url','')}"
 
 # ===================== DISCORD =====================
 def build_embed(game):
     is_epic = game["source"] == "Epic Games"
     color = 0x1D9E75 if is_epic else 0x1B2838
 
-    # ราคา + วันหมด + คะแนน
     price_str = game.get("original_price", "N/A")
     end_date = game.get("end_date", "")
     score = game.get("score", "")
 
-    # บรรทัดข้อมูลหลัก: ~~ราคาเดิม~~ **Free** until XX/XX/XXXX  score ★
     info_parts = []
     if price_str and price_str != "N/A":
         info_parts.append(f"~~{price_str}~~")
@@ -329,7 +309,6 @@ def build_embed(game):
         info_parts.append(f"  {score} ★")
     info_line = "  ".join(info_parts)
 
-    # ลิงก์เปิด
     if is_epic:
         links_line = f"[Open in browser ↗]({game['url']})"
     else:
@@ -339,7 +318,6 @@ def build_embed(game):
             f"[Open in Steam Client ↗](steam://store/{appid})"
         )
 
-    # แท็กหมวดหมู่ (emoji dot + ชื่อ)
     tag_colors = ["🔴", "🟢", "🟣", "🔵", "🟠"]
     tags = game.get("tags", [])
     tag_line = "  ".join(
@@ -370,13 +348,11 @@ def build_embed(game):
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-    # thumbnail (โลโก้ Steam หรือ Epic)
     if is_epic:
         embed["thumbnail"] = {"url": "https://upload.wikimedia.org/wikipedia/commons/3/31/Epic_Games_logo.svg"}
     else:
         embed["thumbnail"] = {"url": "https://store.steampowered.com/favicon.ico"}
 
-    # ลบ key ที่เป็น None
     embed = {k: v for k, v in embed.items() if v is not None}
     return embed
 
@@ -388,7 +364,6 @@ def send_discord(games):
 
     embeds = [build_embed(g) for g in games]
 
-    # Discord จำกัด 10 embeds ต่อ 1 request — แบ่งส่งถ้าเกิน
     chunk_size = 10
     for i in range(0, len(embeds), chunk_size):
         chunk = embeds[i:i + chunk_size]
@@ -415,9 +390,7 @@ def send_discord_message(text: str):
 
 
 def send_status_embed(platform_has: dict):
-    # Build a friendly embed summarizing which platforms currently have freebies
     try:
-        # Minimal embed: one clean field per platform showing only status
         icons = {True: "✅", False: "❌"}
         epic_has = platform_has.get("Epic Games", False)
         steam_has = platform_has.get("Steam", False)
@@ -436,14 +409,10 @@ def send_status_embed(platform_has: dict):
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-        # If no platform has freebies and a local status image exists, try to attach it.
         try:
             local_img = Path("images/main.png")
             if not (epic_has or steam_has) and local_img.exists():
-                # Prepare embed to reference the attachment
                 embed["image"] = {"url": f"attachment://{local_img.name}"}
-
-                # Send as multipart/form-data with payload_json + file attachment (Discord supports this)
                 try:
                     with open(local_img, "rb") as f:
                         files = {"file": (local_img.name, f, "application/octet-stream")}
@@ -457,7 +426,6 @@ def send_status_embed(platform_has: dict):
                 except Exception as e:
                     if DEBUG:
                         print(f"Error sending attachment: {e}")
-                    # fall through to normal embed/json post below
         except Exception:
             pass
 
@@ -467,7 +435,6 @@ def send_status_embed(platform_has: dict):
             return
         print(f"ส่งสถานะแบบ embed ไม่สำเร็จ: {res.status_code} {res.text}")
 
-        # Fallback to very simple plain text
         try:
             fallback = " | ".join(f"{p}: {'มี' if has else 'ไม่มี'}" for p, has in platform_has.items())
             r2 = requests.post(WEBHOOK_URL, json={"content": fallback}, headers={"Content-Type": "application/json"})
@@ -498,7 +465,6 @@ if __name__ == "__main__":
         all_games = epic + steam
         print(f"พบ Epic: {len(epic)} เกม, Steam: {len(steam)} เกม")
 
-        # identify new games
         new_games = []
         for g in all_games:
             gid = get_game_id(g)
@@ -506,19 +472,16 @@ if __name__ == "__main__":
                 new_games.append(g)
                 notified.setdefault("ids", []).append(gid)
 
-        # send new game notifications
         if new_games:
             print(f"ส่งแจ้งเตือนเกมใหม่: {len(new_games)}")
             send_discord(new_games)
             save_json(NOTIFIED_FILE, notified)
 
-        # platform status: which platforms currently have no freebies
         platform_has = {
             "Epic Games": len(epic) > 0,
             "Steam": len(steam) > 0,
         }
 
-        # if status changed, send a short message indicating platforms with no freebies
         if platform_has != last_status:
             send_status_embed(platform_has)
             last_status = platform_has
