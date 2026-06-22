@@ -2,14 +2,14 @@ name: Free Games Notifier
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # ทุก 5 นาที
+    - cron: '0 2 * * *'  # ทุกวัน 09:00 น. เวลาไทย
   workflow_dispatch:        # กดรันมือได้จาก GitHub
 
 permissions:
   contents: write
 
 jobs:
-  notify:
+  notify: 
     runs-on: ubuntu-latest
     concurrency:
       group: free-games-notifier
