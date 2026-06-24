@@ -6,7 +6,7 @@
 
 -  **ตรวจสอบเกมฟรี** - Epic Games Store และ Steam Store
 -  **Discord Notifications** - แจ้งเตือนไปยัง Discord พร้อมภาพและรายละเอียด
--  **Polling Loop** - ตรวจสอบอัตโนมัติทุกวัน 09:00 น. เวลาไทย (GitHub Actions)
+-  **Polling Loop** - ตรวจสอบอัตโนมัติทุก 10 นาที (GitHub Actions)
 -  **ไม่แจ้งซ้ำ** - ระบบ Dedup ที่ติดตาม promotion period
 -  **Status Embed** - แสดงสถานะของแต่ละแพลตฟอร์ม
 -  **Rich Format** - Embed พร้อมรูป ราคา คะแนน และแท็ก
@@ -134,7 +134,7 @@ Example:   steam:1180660
    - Value: Your webhook URL
 
 2. **Workflow File:** `.github/workflows/notify.yml`
-    - ตั้งค่าแล้ว (รันทุกวัน 09:00 น. เวลาไทย)
+  - ตั้งค่าแล้ว (รันทุก 10 นาที)
    - เก็บ `notified.json` ใน Git
 
 ##  สถานะไฟล์

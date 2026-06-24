@@ -21,9 +21,19 @@ if not WEBHOOK_URL:
     sys.exit(1)
 
 # ===================== EPIC GAMES =====================
+def parse_utc_iso8601(value: str):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
 def get_epic_free_games():
     url = "https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions?locale=th&country=TH&allowCountries=TH"
     try:
+        now_utc = datetime.now(timezone.utc)
         res = requests.get(url, timeout=10)
         data = res.json()
         games = data["data"]["Catalog"]["searchStore"]["elements"]
@@ -40,45 +50,59 @@ def get_epic_free_games():
             if not offers:
                 if DEBUG:
                     print(f"[EPIC SKIP] no current promotionalOffers for {game.get('title')}")
-                # optionally check upcoming promotions
-                if NOTIFY_UPCOMING:
-                    upcoming = promotions.get("upcomingPromotionalOffers", [])
-                    for ug in upcoming:
-                        for uoffer in ug.get("promotionalOffers", []) or []:
-                            try:
-                                if uoffer.get("discountSetting", {}).get("discountPercentage") == 0:
-                                    start_date = uoffer.get("startDate", "")
-                                    try:
-                                        sdt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
-                                        start_date_fmt = sdt.strftime("%d/%m/%Y %H:%M UTC")
-                                    except Exception:
-                                        start_date_fmt = start_date
+                upcoming = promotions.get("upcomingPromotionalOffers", [])
+                for ug in upcoming:
+                    for uoffer in ug.get("promotionalOffers", []) or []:
+                        try:
+                            if uoffer.get("discountSetting", {}).get("discountPercentage") != 0:
+                                continue
 
-                                    title = game.get("title")
-                                    slug = game.get("productSlug") or game.get("urlSlug", "")
-                                    url_game = f"https://store.epicgames.com/th/p/{slug}"
-                                    image_url = ""
-                                    for img in game.get("keyImages", []):
-                                        if img.get("type") in ("Thumbnail", "DieselStoreFrontWide", "OfferImageWide"):
-                                            image_url = img.get("url", "")
-                                            break
-                                    free_games.append({
-                                        "title": title + " (เริ่มเร็วๆ นี้)",
-                                        "url": url_game,
-                                        "source": "Epic Games",
-                                        "original_price": game.get("price", {}).get("totalPrice", {}).get("fmtOriginalPrice", "N/A"),
-                                        "end_date": uoffer.get("endDate", ""),
-                                        "image_url": image_url,
-                                        "tags": [t.get("name", "") for t in game.get("tags", [])][:3],
-                                        "description": game.get("description", "")[:200],
-                                        "store_url": url_game,
-                                        "start_date": start_date,
-                                    })
-                                    if DEBUG:
-                                        print(f"[EPIC UPCOMING] will notify upcoming free for {title} starting {start_date_fmt}")
+                            start_date = uoffer.get("startDate", "")
+                            start_dt = parse_utc_iso8601(start_date)
+                            has_started = start_dt is not None and start_dt <= now_utc
+
+                            # Notify pre-start only when NOTIFY_UPCOMING is enabled.
+                            if not has_started and not NOTIFY_UPCOMING:
+                                continue
+
+                            title = game.get("title")
+                            if not has_started:
+                                title = title + " (เริ่มเร็วๆ นี้)"
+
+                            slug = game.get("productSlug") or game.get("urlSlug", "")
+                            url_game = f"https://store.epicgames.com/th/p/{slug}"
+
+                            image_url = ""
+                            for img in game.get("keyImages", []):
+                                if img.get("type") in ("Thumbnail", "DieselStoreFrontWide", "OfferImageWide"):
+                                    image_url = img.get("url", "")
                                     break
-                            except Exception:
-                                pass
+
+                            end_date = uoffer.get("endDate", "")
+                            end_dt = parse_utc_iso8601(end_date)
+                            end_date_fmt = end_dt.strftime("%d/%m/%Y") if end_dt else end_date
+
+                            free_games.append({
+                                "title": title,
+                                "url": url_game,
+                                "source": "Epic Games",
+                                "original_price": game.get("price", {}).get("totalPrice", {}).get("fmtOriginalPrice", "N/A"),
+                                "end_date": end_date_fmt,
+                                "image_url": image_url,
+                                "tags": [t.get("name", "") for t in game.get("tags", [])][:3],
+                                "description": game.get("description", "")[:200],
+                                "store_url": url_game,
+                                "start_date": start_date,
+                            })
+                            if DEBUG:
+                                if has_started:
+                                    print(f"[EPIC STARTED] notify now for {game.get('title')}")
+                                else:
+                                    start_date_fmt = start_dt.strftime("%d/%m/%Y %H:%M UTC") if start_dt else start_date
+                                    print(f"[EPIC UPCOMING] will notify upcoming free for {game.get('title')} starting {start_date_fmt}")
+                            break
+                        except Exception:
+                            pass
                 continue
 
             for offer_group in offers:
