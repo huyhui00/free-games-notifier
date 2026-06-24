@@ -56,18 +56,18 @@
 
 #### GitHub Actions (2/2)
 - ✅ Workflow configured (.github/workflows/notify.yml)
-- ✅ Schedule: Every 5 minutes (*/5 * * * *)
+- ✅ Schedule: Every day at 09:00 Thailand time (0 2 * * *)
 
 ---
 
-### ⚠️ ไม่มี (1 จาก 36)
+### ⚠️ Optional Features Status
 
 #### Optional Features
 - ❌ DRY_RUN mode (preview without sending)
 - ❌ FORCE_NOTIFY flag (bypass dedup)
 - ❌ Multiple webhook support
 - ❌ Game filtering by price range
-- ❌ Webhook retry logic
+- ✅ Webhook retry logic
 - ❌ Rate limiting
 
 ---

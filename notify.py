@@ -13,6 +13,8 @@ POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "60"))  # seconds
 RUN_ONCE = os.environ.get("RUN_ONCE", "0") == "1"
 DEBUG = os.environ.get("DEBUG", "0") == "1"
 NOTIFY_UPCOMING = os.environ.get("NOTIFY_UPCOMING", "0") == "1"
+WEBHOOK_MAX_RETRIES = int(os.environ.get("WEBHOOK_MAX_RETRIES", "3"))
+WEBHOOK_RETRY_BASE = float(os.environ.get("WEBHOOK_RETRY_BASE", "1.5"))
 
 if not WEBHOOK_URL:
     print("Error: DISCORD_WEBHOOK_URL environment variable is not set.\nSet it and re-run, e.g. in PowerShell:\n$env:DISCORD_WEBHOOK_URL=\"https://discord.com/api/webhooks/...\"\n")
@@ -357,34 +359,102 @@ def build_embed(game):
     return embed
 
 
+def _get_retry_wait_seconds(response, attempt_index: int) -> float:
+    retry_after = response.headers.get("Retry-After")
+    if retry_after:
+        try:
+            return max(float(retry_after), 0.5)
+        except Exception:
+            pass
+
+    try:
+        body = response.json()
+        value = body.get("retry_after")
+        if isinstance(value, (int, float)):
+            wait = float(value)
+            # Some APIs return milliseconds; normalize to seconds when needed.
+            if wait > 1000:
+                wait = wait / 1000.0
+            return max(wait, 0.5)
+    except Exception:
+        pass
+
+    return WEBHOOK_RETRY_BASE * (2 ** attempt_index)
+
+
+def post_discord_json_with_retry(payload: dict, label: str):
+    last_response = None
+    for attempt in range(WEBHOOK_MAX_RETRIES + 1):
+        try:
+            response = requests.post(WEBHOOK_URL, json=payload, timeout=15)
+            last_response = response
+        except requests.RequestException as ex:
+            if attempt >= WEBHOOK_MAX_RETRIES:
+                print(f"ส่ง {label} ไม่สำเร็จ: {ex}")
+                return None
+            wait_seconds = WEBHOOK_RETRY_BASE * (2 ** attempt)
+            if DEBUG:
+                print(f"{label}: network error, retry in {wait_seconds:.1f}s ({attempt + 1}/{WEBHOOK_MAX_RETRIES})")
+            time.sleep(wait_seconds)
+            continue
+
+        if response.status_code in (200, 204):
+            return response
+
+        should_retry = response.status_code == 429 or response.status_code >= 500
+        if not should_retry or attempt >= WEBHOOK_MAX_RETRIES:
+            return response
+
+        wait_seconds = _get_retry_wait_seconds(response, attempt)
+        if DEBUG:
+            print(
+                f"{label}: status {response.status_code}, retry in {wait_seconds:.1f}s "
+                f"({attempt + 1}/{WEBHOOK_MAX_RETRIES})"
+            )
+        time.sleep(wait_seconds)
+
+    return last_response
+
+
 def send_discord(games):
     if not games:
         print("ไม่มีเกมฟรีตอนนี้")
-        return
+        return set()
 
     embeds = [build_embed(g) for g in games]
+    sent_indexes = set()
 
     chunk_size = 10
     for i in range(0, len(embeds), chunk_size):
         chunk = embeds[i:i + chunk_size]
         payload = {"embeds": chunk}
 
-        res = requests.post(WEBHOOK_URL, json=payload)
-        if res.status_code in (200, 204):
+        batch_num = i // chunk_size + 1
+        res = post_discord_json_with_retry(payload, f"game batch {batch_num}")
+        if res is not None and res.status_code in (200, 204):
             print(f"ส่งสำเร็จ batch {i // chunk_size + 1} ({len(chunk)} เกม)")
+            sent_indexes.update(range(i, i + len(chunk)))
         else:
-            print(f"ส่งไม่สำเร็จ: {res.status_code} {res.text}")
+            if res is None:
+                print(f"ส่งไม่สำเร็จ batch {batch_num}: network error")
+            else:
+                print(f"ส่งไม่สำเร็จ batch {batch_num}: {res.status_code} {res.text}")
+
+    return sent_indexes
 
 
 def send_discord_message(text: str):
     if not text:
         return
     try:
-        res = requests.post(WEBHOOK_URL, json={"content": text})
-        if res.status_code in (200, 204):
+        res = post_discord_json_with_retry({"content": text}, "status message")
+        if res is not None and res.status_code in (200, 204):
             print("ส่งข้อความสถานะสำเร็จ")
         else:
-            print(f"ส่งข้อความสถานะไม่สำเร็จ: {res.status_code} {res.text}")
+            if res is None:
+                print("ส่งข้อความสถานะไม่สำเร็จ: network error")
+            else:
+                print(f"ส่งข้อความสถานะไม่สำเร็จ: {res.status_code} {res.text}")
     except Exception as e:
         print(f"Error sending status message: {e}")
 
@@ -429,19 +499,25 @@ def send_status_embed(platform_has: dict):
         except Exception:
             pass
 
-        res = requests.post(WEBHOOK_URL, json={"embeds": [embed]}, headers={"Content-Type": "application/json"})
-        if res.status_code in (200, 204):
+        res = post_discord_json_with_retry({"embeds": [embed]}, "status embed")
+        if res is not None and res.status_code in (200, 204):
             print("ส่งสถานะแบบ embed สำเร็จ")
             return
-        print(f"ส่งสถานะแบบ embed ไม่สำเร็จ: {res.status_code} {res.text}")
+        if res is None:
+            print("ส่งสถานะแบบ embed ไม่สำเร็จ: network error")
+        else:
+            print(f"ส่งสถานะแบบ embed ไม่สำเร็จ: {res.status_code} {res.text}")
 
         try:
             fallback = " | ".join(f"{p}: {'มี' if has else 'ไม่มี'}" for p, has in platform_has.items())
-            r2 = requests.post(WEBHOOK_URL, json={"content": fallback}, headers={"Content-Type": "application/json"})
-            if r2.status_code in (200, 204):
+            r2 = post_discord_json_with_retry({"content": fallback}, "status fallback")
+            if r2 is not None and r2.status_code in (200, 204):
                 print("ส่งสถานะแบบข้อความสำเร็จ (fallback)")
             else:
-                print(f"Fallback ส่งไม่สำเร็จ: {r2.status_code} {r2.text}")
+                if r2 is None:
+                    print("Fallback ส่งไม่สำเร็จ: network error")
+                else:
+                    print(f"Fallback ส่งไม่สำเร็จ: {r2.status_code} {r2.text}")
         except Exception as e:
             print(f"Fallback error: {e}")
     except Exception as e:
@@ -465,17 +541,28 @@ if __name__ == "__main__":
         all_games = epic + steam
         print(f"พบ Epic: {len(epic)} เกม, Steam: {len(steam)} เกม")
 
+        notified_ids = set(notified.get("ids", []))
         new_games = []
         for g in all_games:
             gid = get_game_id(g)
-            if gid not in notified.get("ids", []):
-                new_games.append(g)
-                notified.setdefault("ids", []).append(gid)
+            if gid not in notified_ids:
+                new_games.append((gid, g))
 
         if new_games:
             print(f"ส่งแจ้งเตือนเกมใหม่: {len(new_games)}")
-            send_discord(new_games)
-            save_json(NOTIFIED_FILE, notified)
+            sent_indexes = send_discord([g for _, g in new_games])
+
+            if sent_indexes:
+                for idx in sorted(sent_indexes):
+                    gid, _ = new_games[idx]
+                    if gid not in notified_ids:
+                        notified.setdefault("ids", []).append(gid)
+                        notified_ids.add(gid)
+                save_json(NOTIFIED_FILE, notified)
+
+            failed_count = len(new_games) - len(sent_indexes)
+            if failed_count > 0:
+                print(f"มีเกมส่งไม่สำเร็จ {failed_count} รายการ จะลองใหม่รอบถัดไป")
 
         platform_has = {
             "Epic Games": len(epic) > 0,

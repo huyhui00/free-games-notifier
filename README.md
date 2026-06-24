@@ -6,7 +6,7 @@
 
 -  **ตรวจสอบเกมฟรี** - Epic Games Store และ Steam Store
 -  **Discord Notifications** - แจ้งเตือนไปยัง Discord พร้อมภาพและรายละเอียด
--  **Polling Loop** - ตรวจสอบอัตโนมัติทุก 5 นาที (GitHub Actions)
+-  **Polling Loop** - ตรวจสอบอัตโนมัติทุกวัน 09:00 น. เวลาไทย (GitHub Actions)
 -  **ไม่แจ้งซ้ำ** - ระบบ Dedup ที่ติดตาม promotion period
 -  **Status Embed** - แสดงสถานะของแต่ละแพลตฟอร์ม
 -  **Rich Format** - Embed พร้อมรูป ราคา คะแนน และแท็ก
@@ -84,6 +84,8 @@ DEBUG=1 python3 notify.py
 | `POLL_INTERVAL` | 60 | วินาทีระหว่างการตรวจสอบ |
 | `DEBUG` | 0 | 0 = ปกติ, 1 = แสดง skip reasons |
 | `NOTIFY_UPCOMING` | 0 | 0 = ข้ามเกมที่มาเร็วๆ นี้, 1 = แจ้งด้วย |
+| `WEBHOOK_MAX_RETRIES` | 3 | จำนวนครั้ง retry เมื่อ Discord ตอบ 429/5xx หรือเกิด network error |
+| `WEBHOOK_RETRY_BASE` | 1.5 | เวลาฐาน (วินาที) สำหรับ exponential backoff |
 | `NOTIFIED_FILE` | notified.json | ไฟล์เก็บ dedup IDs |
 | `STATUS_FILE` | status.json | ไฟล์เก็บสถานะแพลตฟอร์ม |
 
@@ -132,7 +134,7 @@ Example:   steam:1180660
    - Value: Your webhook URL
 
 2. **Workflow File:** `.github/workflows/notify.yml`
-   - ตั้งค่าแล้ว (รันทุก 5 นาที)
+    - ตั้งค่าแล้ว (รันทุกวัน 09:00 น. เวลาไทย)
    - เก็บ `notified.json` ใน Git
 
 ##  สถานะไฟล์
