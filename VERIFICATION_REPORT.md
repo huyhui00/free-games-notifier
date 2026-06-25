@@ -56,7 +56,7 @@
 
 #### GitHub Actions (2/2)
 - ✅ Workflow configured (.github/workflows/notify.yml)
-- ✅ Schedule: Every day at 09:00 Thailand time (0 2 * * *)
+- ✅ Schedule: Every day at 22:01 Thailand time (1 15 * * *)
 
 ---
 
@@ -125,7 +125,7 @@ free-games-notifier/
 - Format: Rich Discord embeds with images, prices, tags, scores
 - Batch: Up to 10 embeds per message
 - Status: Shows which platforms have active promotions
-- Polling: Every day at 09:00 (Thailand time) via GitHub Actions
+- Polling: Every day at 22:01 (Thailand time) via GitHub Actions
 
 ### State Persistence
 - notified.json: Tracks game IDs to prevent duplicates
