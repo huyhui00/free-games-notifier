@@ -81,7 +81,7 @@ DEBUG=1 python3 notify.py
 |--------|-----------|---------|
 | `DISCORD_WEBHOOK_URL` | - | **จำเป็น** - Discord Webhook URL |
 | `RUN_ONCE` | 0 | 0 = loop ตลอด, 1 = รันครั้งเดียว |
-| `POLL_INTERVAL` | 60 | วินาทีระหว่างการตรวจสอบ |
+| `POLL_INTERVAL` | 600.6 | วินาทีระหว่างการตรวจสอบ (10.01 นาที) |
 | `DEBUG` | 0 | 0 = ปกติ, 1 = แสดง skip reasons |
 | `NOTIFY_UPCOMING` | 0 | 0 = ข้ามเกมที่มาเร็วๆ นี้, 1 = แจ้งด้วย |
 | `WEBHOOK_MAX_RETRIES` | 3 | จำนวนครั้ง retry เมื่อ Discord ตอบ 429/5xx หรือเกิด network error |

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 NOTIFIED_FILE = Path(os.environ.get("NOTIFIED_FILE", "notified.json"))
 STATUS_FILE = Path(os.environ.get("STATUS_FILE", "status.json"))
-POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "60"))  # seconds
+POLL_INTERVAL = float(os.environ.get("POLL_INTERVAL", "600.6"))  # seconds (10.01 minutes)
 RUN_ONCE = os.environ.get("RUN_ONCE", "0") == "1"
 DEBUG = os.environ.get("DEBUG", "0") == "1"
 NOTIFY_UPCOMING = os.environ.get("NOTIFY_UPCOMING", "0") == "1"
