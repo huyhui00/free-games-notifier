@@ -8,11 +8,9 @@ from datetime import datetime, timezone
 
 WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 NOTIFIED_FILE = Path(os.environ.get("NOTIFIED_FILE", "notified.json"))
-STATUS_FILE = Path(os.environ.get("STATUS_FILE", "status.json"))
 POLL_INTERVAL = float(os.environ.get("POLL_INTERVAL", "600.6"))  # seconds (10.01 minutes)
 RUN_ONCE = os.environ.get("RUN_ONCE", "0") == "1"
 DEBUG = os.environ.get("DEBUG", "0") == "1"
-NOTIFY_UPCOMING = os.environ.get("NOTIFY_UPCOMING", "0") == "1"
 WEBHOOK_MAX_RETRIES = int(os.environ.get("WEBHOOK_MAX_RETRIES", "3"))
 WEBHOOK_RETRY_BASE = float(os.environ.get("WEBHOOK_RETRY_BASE", "1.5"))
 
@@ -21,19 +19,9 @@ if not WEBHOOK_URL:
     sys.exit(1)
 
 # ===================== EPIC GAMES =====================
-def parse_utc_iso8601(value: str):
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except Exception:
-        return None
-
-
 def get_epic_free_games():
     url = "https://store-site-backend-static.ak.epicgames.com/freeGamesPromotions?locale=th&country=TH&allowCountries=TH"
     try:
-        now_utc = datetime.now(timezone.utc)
         res = requests.get(url, timeout=10)
         data = res.json()
         games = data["data"]["Catalog"]["searchStore"]["elements"]
@@ -45,64 +33,11 @@ def get_epic_free_games():
                     print(f"[EPIC SKIP] no promotions for {game.get('title')}")
                 continue
 
-            # Only consider current promotionalOffers (not upcomingPromotionalOffers)
+            # Only consider current promotionalOffers (skip upcoming promotions)
             offers = promotions.get("promotionalOffers", [])
             if not offers:
                 if DEBUG:
                     print(f"[EPIC SKIP] no current promotionalOffers for {game.get('title')}")
-                upcoming = promotions.get("upcomingPromotionalOffers", [])
-                for ug in upcoming:
-                    for uoffer in ug.get("promotionalOffers", []) or []:
-                        try:
-                            if uoffer.get("discountSetting", {}).get("discountPercentage") != 0:
-                                continue
-
-                            start_date = uoffer.get("startDate", "")
-                            start_dt = parse_utc_iso8601(start_date)
-                            has_started = start_dt is not None and start_dt <= now_utc
-
-                            # Notify pre-start only when NOTIFY_UPCOMING is enabled.
-                            if not has_started and not NOTIFY_UPCOMING:
-                                continue
-
-                            title = game.get("title")
-                            if not has_started:
-                                title = title + " (เริ่มเร็วๆ นี้)"
-
-                            slug = game.get("productSlug") or game.get("urlSlug", "")
-                            url_game = f"https://store.epicgames.com/th/p/{slug}"
-
-                            image_url = ""
-                            for img in game.get("keyImages", []):
-                                if img.get("type") in ("Thumbnail", "DieselStoreFrontWide", "OfferImageWide"):
-                                    image_url = img.get("url", "")
-                                    break
-
-                            end_date = uoffer.get("endDate", "")
-                            end_dt = parse_utc_iso8601(end_date)
-                            end_date_fmt = end_dt.strftime("%d/%m/%Y") if end_dt else end_date
-
-                            free_games.append({
-                                "title": title,
-                                "url": url_game,
-                                "source": "Epic Games",
-                                "original_price": game.get("price", {}).get("totalPrice", {}).get("fmtOriginalPrice", "N/A"),
-                                "end_date": end_date_fmt,
-                                "image_url": image_url,
-                                "tags": [t.get("name", "") for t in game.get("tags", [])][:3],
-                                "description": game.get("description", "")[:200],
-                                "store_url": url_game,
-                                "start_date": start_date,
-                            })
-                            if DEBUG:
-                                if has_started:
-                                    print(f"[EPIC STARTED] notify now for {game.get('title')}")
-                                else:
-                                    start_date_fmt = start_dt.strftime("%d/%m/%Y %H:%M UTC") if start_dt else start_date
-                                    print(f"[EPIC UPCOMING] will notify upcoming free for {game.get('title')} starting {start_date_fmt}")
-                            break
-                        except Exception:
-                            pass
                 continue
 
             for offer_group in offers:
@@ -467,87 +402,6 @@ def send_discord(games):
     return sent_indexes
 
 
-def send_discord_message(text: str):
-    if not text:
-        return
-    try:
-        res = post_discord_json_with_retry({"content": text}, "status message")
-        if res is not None and res.status_code in (200, 204):
-            print("ส่งข้อความสถานะสำเร็จ")
-        else:
-            if res is None:
-                print("ส่งข้อความสถานะไม่สำเร็จ: network error")
-            else:
-                print(f"ส่งข้อความสถานะไม่สำเร็จ: {res.status_code} {res.text}")
-    except Exception as e:
-        print(f"Error sending status message: {e}")
-
-
-def send_status_embed(platform_has: dict):
-    try:
-        icons = {True: "✅", False: "❌"}
-        epic_has = platform_has.get("Epic Games", False)
-        steam_has = platform_has.get("Steam", False)
-
-        color = 0x1D9E75 if (epic_has or steam_has) else 0x95A5A6
-
-        embed = {
-            "title": "สถานะการแจกเกมฟรี",
-            "description": "แพลตฟอร์มไหนมีแจกหรือไม่ — ดูสรุปสั้น ๆ ด้านล่าง",
-            "color": color,
-            "fields": [
-                {"name": "Epic Games", "value": f"{icons[epic_has]} {'มีแจก' if epic_has else 'ยังไม่มีแจก'}", "inline": True},
-                {"name": "Steam", "value": f"{icons[steam_has]} {'มีแจก' if steam_has else 'ยังไม่มีแจก'}", "inline": True},
-            ],
-            "footer": {"text": "Free Games Notifier"},
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-        try:
-            local_img = Path("images/main.png")
-            if not (epic_has or steam_has) and local_img.exists():
-                embed["image"] = {"url": f"attachment://{local_img.name}"}
-                try:
-                    with open(local_img, "rb") as f:
-                        files = {"file": (local_img.name, f, "application/octet-stream")}
-                        payload = {"payload_json": json.dumps({"embeds": [embed]})}
-                        r = requests.post(WEBHOOK_URL, data=payload, files=files)
-                        if r.status_code in (200, 204):
-                            print("ส่งสถานะแบบ embed พร้อมรูปแนบสำเร็จ")
-                            return
-                        else:
-                            print(f"ส่งสถานะพร้อมรูปไม่สำเร็จ: {r.status_code} {r.text}")
-                except Exception as e:
-                    if DEBUG:
-                        print(f"Error sending attachment: {e}")
-        except Exception:
-            pass
-
-        res = post_discord_json_with_retry({"embeds": [embed]}, "status embed")
-        if res is not None and res.status_code in (200, 204):
-            print("ส่งสถานะแบบ embed สำเร็จ")
-            return
-        if res is None:
-            print("ส่งสถานะแบบ embed ไม่สำเร็จ: network error")
-        else:
-            print(f"ส่งสถานะแบบ embed ไม่สำเร็จ: {res.status_code} {res.text}")
-
-        try:
-            fallback = " | ".join(f"{p}: {'มี' if has else 'ไม่มี'}" for p, has in platform_has.items())
-            r2 = post_discord_json_with_retry({"content": fallback}, "status fallback")
-            if r2 is not None and r2.status_code in (200, 204):
-                print("ส่งสถานะแบบข้อความสำเร็จ (fallback)")
-            else:
-                if r2 is None:
-                    print("Fallback ส่งไม่สำเร็จ: network error")
-                else:
-                    print(f"Fallback ส่งไม่สำเร็จ: {r2.status_code} {r2.text}")
-        except Exception as e:
-            print(f"Fallback error: {e}")
-    except Exception as e:
-        print(f"Error sending status embed: {e}")
-
-
 # ===================== MAIN =====================
 if __name__ == "__main__":
     print("เริ่ม bot แจ้งเตือนเกมฟรี (polling)...")
@@ -555,8 +409,6 @@ if __name__ == "__main__":
     notified = load_json(NOTIFIED_FILE) or {"ids": []}
     if "ids" not in notified:
         notified = {"ids": []}
-
-    last_status = load_json(STATUS_FILE) or {}
 
     while True:
         print(f"[{datetime.now().isoformat()}] ตรวจสอบเกมฟรี...")
@@ -587,16 +439,6 @@ if __name__ == "__main__":
             failed_count = len(new_games) - len(sent_indexes)
             if failed_count > 0:
                 print(f"มีเกมส่งไม่สำเร็จ {failed_count} รายการ จะลองใหม่รอบถัดไป")
-
-        platform_has = {
-            "Epic Games": len(epic) > 0,
-            "Steam": len(steam) > 0,
-        }
-
-        if platform_has != last_status:
-            send_status_embed(platform_has)
-            last_status = platform_has
-            save_json(STATUS_FILE, last_status)
 
         if RUN_ONCE:
             print("รันแบบครั้งเดียวเสร็จสิ้น")

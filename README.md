@@ -8,7 +8,6 @@
 -  **Discord Notifications** - แจ้งเตือนไปยัง Discord พร้อมภาพและรายละเอียด
 -  **Polling Loop** - ตรวจสอบอัตโนมัติทุกวัน 23:00 น. เวลาไทย (GitHub Actions)
 -  **ไม่แจ้งซ้ำ** - ระบบ Dedup ที่ติดตาม promotion period
--  **Status Embed** - แสดงสถานะของแต่ละแพลตฟอร์ม
 -  **Rich Format** - Embed พร้อมรูป ราคา คะแนน และแท็ก
 
 ##  เกมที่ตรวจสอบ
@@ -83,11 +82,9 @@ DEBUG=1 python3 notify.py
 | `RUN_ONCE` | 0 | 0 = loop ตลอด, 1 = รันครั้งเดียว |
 | `POLL_INTERVAL` | 600.6 | วินาทีระหว่างการตรวจสอบ (10.01 นาที) |
 | `DEBUG` | 0 | 0 = ปกติ, 1 = แสดง skip reasons |
-| `NOTIFY_UPCOMING` | 0 | 0 = ข้ามเกมที่มาเร็วๆ นี้, 1 = แจ้งด้วย |
 | `WEBHOOK_MAX_RETRIES` | 3 | จำนวนครั้ง retry เมื่อ Discord ตอบ 429/5xx หรือเกิด network error |
 | `WEBHOOK_RETRY_BASE` | 1.5 | เวลาฐาน (วินาที) สำหรับ exponential backoff |
 | `NOTIFIED_FILE` | notified.json | ไฟล์เก็บ dedup IDs |
-| `STATUS_FILE` | status.json | ไฟล์เก็บสถานะแพลตฟอร์ม |
 
 ##  สถาปัตยกรรม Dedup (ป้องกันการแจ้งซ้ำ)
 
@@ -124,7 +121,6 @@ Example:   steam:1180660
 
 ### Message Format
 - **Game Embed:** ชื่อ + ราคา + วันหมด + คะแนน + แท็ก + ลิงก์
-- **Status Embed:** แพลตฟอร์มไหนมีแจก (✅/❌)
 
 ##  GitHub Actions Setup
 
@@ -141,7 +137,6 @@ Example:   steam:1180660
 
 ```
 notified.json  - เกมที่เคยแจ้งแล้ว (ไม่แจ้งซ้ำ)
-status.json    - สถานะแพลตฟอร์ม (เพื่อตรวจหาการเปลี่ยนแปลง)
 ```
 
 ##  Troubleshooting
