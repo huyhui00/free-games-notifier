@@ -2,7 +2,7 @@ name: Free Games Notifier
 
 on:
   schedule:
-    - cron: '1 15 * * *'  # ทุกวัน 22:01 น. เวลาไทย
+    - cron: '0 16 * * *'  # ทุกวัน 23:00 น. เวลาไทย
   workflow_dispatch:        # กดรันมือได้จาก GitHub
 
 permissions:
