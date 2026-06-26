@@ -90,9 +90,10 @@ DEBUG=1 python3 notify.py
 
 ### Epic Games
 ```
-ID format: epic:{slug}:{YYYYMMDD}
-Example:   epic:fortnite:20260619
+ID format: epic:{catalog_id}:{YYYYMMDD}
+Example:   epic:4ec50a302f1449b3bf706a199c333ab8:20260625
 ```
+- ใช้ Epic catalog id ที่คงที่ แทน URL slug ที่ Epic เปลี่ยนรูปแบบได้
 - ต่างครั้ง = `startDate` ต่างกัน = ID ต่างกัน → **จะแจ้งอีก** ✓
 
 ### Steam

@@ -70,15 +70,12 @@ def get_epic_free_games():
                             print(f"[EPIC SKIP] price parse error for {game.get('title')}")
                         continue
 
-                    # === BUG FIX: this block was inside except, now correctly outside ===
                     title = game["title"]
-                    slug = game.get("productSlug") or game.get("urlSlug", "")
+                    slug = get_epic_slug(game)
                     url_game = f"https://store.epicgames.com/th/p/{slug}"
 
-                    # ราคาปกติ (formatted)
                     original_price = price_info.get("fmtOriginalPrice", "N/A")
 
-                    # วันหมดโปรโมชัน
                     end_date_str = offer.get("endDate", "")
                     end_date = ""
                     if end_date_str:
@@ -88,14 +85,12 @@ def get_epic_free_games():
                         except Exception:
                             end_date = end_date_str[:10]
 
-                    # รูป key art
                     image_url = ""
                     for img in game.get("keyImages", []):
                         if img.get("type") in ("Thumbnail", "DieselStoreFrontWide", "OfferImageWide"):
                             image_url = img.get("url", "")
                             break
 
-                    # แท็กหมวดหมู่
                     tags = [t.get("name", "") for t in game.get("tags", []) if t.get("name")][:3]
 
                     free_games.append({
@@ -105,6 +100,8 @@ def get_epic_free_games():
                         "original_price": original_price,
                         "end_date": end_date,
                         "image_url": image_url,
+                        "epic_catalog_id": game.get("id", ""),
+                        "epic_slug": slug,
                         "tags": tags,
                         "description": game.get("description", "")[:200],
                         "store_url": url_game,
@@ -233,11 +230,36 @@ def save_json(path: Path, data):
         print(f"Error writing {path}: {e}")
 
 
+def get_epic_slug(game: dict):
+    page_mappings = game.get("catalogNs", {}).get("mappings", [])
+    for mapping in page_mappings:
+        page_slug = mapping.get("pageSlug")
+        if page_slug:
+            return page_slug
+
+    product_slug = game.get("productSlug") or ""
+    if product_slug:
+        return product_slug.rstrip("/").split("/")[0]
+
+    url_slug = game.get("urlSlug") or ""
+    if url_slug:
+        return url_slug.rstrip("/").split("/")[0]
+
+    return ""
+
+
 def get_game_id(game: dict):
     if game.get("source") == "Epic Games":
-        slug = game.get("url", "").rstrip("/").split("/p/")[-1]
-        slug = slug.rstrip("/").split("/")[0] if slug else ""
+        catalog_id = game.get("epic_catalog_id", "")
         start_date = game.get("start_date", "")
+        if catalog_id and start_date:
+            start_compact = start_date[:10].replace("-", "")
+            return f"epic:{catalog_id}:{start_compact}"
+        if catalog_id:
+            return f"epic:{catalog_id}"
+
+        slug = game.get("epic_slug") or game.get("url", "").rstrip("/").split("/p/")[-1]
+        slug = slug.rstrip("/").split("/")[0] if slug else ""
         if slug and start_date:
             start_compact = start_date[:10].replace("-", "")
             return f"epic:{slug}:{start_compact}"
@@ -250,6 +272,22 @@ def get_game_id(game: dict):
         return f"steam:{appid}"
 
     return f"other:{game.get('title','')}-{game.get('url','')}"
+
+
+def get_game_id_variants(game: dict):
+    ids = {get_game_id(game)}
+
+    if game.get("source") == "Epic Games":
+        slug = game.get("epic_slug") or game.get("url", "").rstrip("/").split("/p/")[-1]
+        slug = slug.rstrip("/").split("/")[0] if slug else ""
+        start_date = game.get("start_date", "")
+        if slug and start_date:
+            start_compact = start_date[:10].replace("-", "")
+            ids.add(f"epic:{slug}:{start_compact}")
+        if slug:
+            ids.add(f"epic:{slug}")
+
+    return ids
 
 # ===================== DISCORD =====================
 def build_embed(game):
@@ -421,7 +459,7 @@ if __name__ == "__main__":
         new_games = []
         for g in all_games:
             gid = get_game_id(g)
-            if gid not in notified_ids:
+            if not get_game_id_variants(g).intersection(notified_ids):
                 new_games.append((gid, g))
 
         if new_games:
