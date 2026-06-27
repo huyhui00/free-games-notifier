@@ -274,19 +274,37 @@ def get_game_id(game: dict):
     return f"other:{game.get('title','')}-{game.get('url','')}"
 
 
+def get_game_id(game: dict):
+    if game.get("source") == "Epic Games":
+        catalog_id = game.get("epic_catalog_id", "")
+        if catalog_id:
+            return f"epic:{catalog_id}"          # ← ไม่มี startDate แล้ว
+        slug = game.get("epic_slug", "")
+        if slug:
+            return f"epic:{slug}"
+        return f"epic:{game.get('title', '')}"
+
+    if game.get("source") == "Steam":
+        appid = game.get("appid", "")
+        return f"steam:{appid}"
+
+    return f"other:{game.get('title', '')}-{game.get('url', '')}"
+
+
 def get_game_id_variants(game: dict):
     ids = {get_game_id(game)}
-
     if game.get("source") == "Epic Games":
-        slug = game.get("epic_slug") or game.get("url", "").rstrip("/").split("/p/")[-1]
-        slug = slug.rstrip("/").split("/")[0] if slug else ""
+        catalog_id = game.get("epic_catalog_id", "")
         start_date = game.get("start_date", "")
-        if slug and start_date:
+        # รองรับ ID เก่าที่มี startDate ใน notified.json
+        if catalog_id and start_date:
             start_compact = start_date[:10].replace("-", "")
-            ids.add(f"epic:{slug}:{start_compact}")
+            ids.add(f"epic:{catalog_id}:{start_compact}")
+        if catalog_id:
+            ids.add(f"epic:{catalog_id}")
+        slug = game.get("epic_slug", "")
         if slug:
             ids.add(f"epic:{slug}")
-
     return ids
 
 # ===================== DISCORD =====================
