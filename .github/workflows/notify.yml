@@ -28,10 +28,24 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
+      - name: Validate Discord webhook secret
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        shell: bash
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "::error::DISCORD_WEBHOOK_URL secret is empty or missing"
+            exit 1
+          fi
+          if [[ "$DISCORD_WEBHOOK_URL" != https://discord.com/api/webhooks/* ]]; then
+            echo "::warning::DISCORD_WEBHOOK_URL does not look like a Discord webhook URL"
+          fi
+
       - name: Run notifier
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           RUN_ONCE: '1'
+          DEBUG: '1'
         run: python notify.py
 
       - name: Commit notified/status files if changed

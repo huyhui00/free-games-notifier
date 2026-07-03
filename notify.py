@@ -11,6 +11,7 @@ NOTIFIED_FILE = Path(os.environ.get("NOTIFIED_FILE", "notified.json"))
 POLL_INTERVAL = float(os.environ.get("POLL_INTERVAL", "600.6"))  # seconds (10.01 minutes)
 RUN_ONCE = os.environ.get("RUN_ONCE", "0") == "1"
 DEBUG = os.environ.get("DEBUG", "0") == "1"
+FORCE_NOTIFY = os.environ.get("FORCE_NOTIFY", "0") == "1"
 WEBHOOK_MAX_RETRIES = int(os.environ.get("WEBHOOK_MAX_RETRIES", "3"))
 WEBHOOK_RETRY_BASE = float(os.environ.get("WEBHOOK_RETRY_BASE", "1.5"))
 
@@ -274,23 +275,6 @@ def get_game_id(game: dict):
     return f"other:{game.get('title','')}-{game.get('url','')}"
 
 
-def get_game_id(game: dict):
-    if game.get("source") == "Epic Games":
-        catalog_id = game.get("epic_catalog_id", "")
-        if catalog_id:
-            return f"epic:{catalog_id}"          # ← ไม่มี startDate แล้ว
-        slug = game.get("epic_slug", "")
-        if slug:
-            return f"epic:{slug}"
-        return f"epic:{game.get('title', '')}"
-
-    if game.get("source") == "Steam":
-        appid = game.get("appid", "")
-        return f"steam:{appid}"
-
-    return f"other:{game.get('title', '')}-{game.get('url', '')}"
-
-
 def get_game_id_variants(game: dict):
     ids = {get_game_id(game)}
     if game.get("source") == "Epic Games":
@@ -461,6 +445,8 @@ def send_discord(games):
 # ===================== MAIN =====================
 if __name__ == "__main__":
     print("เริ่ม bot แจ้งเตือนเกมฟรี (polling)...")
+    if FORCE_NOTIFY:
+        print("FORCE_NOTIFY=1: จะส่งแจ้งเตือนแม้เคยส่งแล้ว")
 
     notified = load_json(NOTIFIED_FILE) or {"ids": []}
     if "ids" not in notified:
@@ -477,7 +463,7 @@ if __name__ == "__main__":
         new_games = []
         for g in all_games:
             gid = get_game_id(g)
-            if not get_game_id_variants(g).intersection(notified_ids):
+            if FORCE_NOTIFY or not get_game_id_variants(g).intersection(notified_ids):
                 new_games.append((gid, g))
 
         if new_games:
@@ -495,6 +481,11 @@ if __name__ == "__main__":
             failed_count = len(new_games) - len(sent_indexes)
             if failed_count > 0:
                 print(f"มีเกมส่งไม่สำเร็จ {failed_count} รายการ จะลองใหม่รอบถัดไป")
+        else:
+            if all_games:
+                print(f"ไม่พบเกมใหม่สำหรับการแจ้งเตือน (อาจติด dedup): พบทั้งหมด {len(all_games)} เกม")
+            else:
+                print("ไม่พบเกมฟรีในรอบนี้")
 
         if RUN_ONCE:
             print("รันแบบครั้งเดียวเสร็จสิ้น")
