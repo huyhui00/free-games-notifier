@@ -140,6 +140,8 @@ def get_steam_free_games():
             tags = []
             end_date = ""
             score = ""
+            is_dlc = False
+            base_game_name = ""
 
             try:
                 detail_res = requests.get(
@@ -148,6 +150,11 @@ def get_steam_free_games():
                 )
                 detail_data = detail_res.json().get(str(appid), {}).get("data", {})
                 if detail_data:
+                    is_dlc = detail_data.get("type") == "dlc"
+                    if is_dlc:
+                        base_game_name = detail_data.get("fullgame", {}).get("name", "")
+                        image_url = ""
+
                     price_overview = detail_data.get("price_overview", {})
                     initial = price_overview.get("initial") if price_overview else None
                     final = price_overview.get("final") if price_overview else None
@@ -212,6 +219,8 @@ def get_steam_free_games():
                 "store_url": store_url,
                 "score": score,
                 "appid": appid,
+                "is_dlc": is_dlc,
+                "base_game_name": base_game_name,
             })
         return free_games
     except Exception as e:
@@ -305,6 +314,9 @@ def build_embed(game):
     score = game.get("score", "")
 
     info_parts = []
+    if game.get("is_dlc"):
+        base_game_name = game.get("base_game_name", "")
+        info_parts.append(f"📦 DLC ของ {base_game_name}" if base_game_name else "📦 DLC")
     if price_str and price_str != "N/A":
         info_parts.append(f"~~{price_str}~~")
     info_parts.append("**Free**")
