@@ -154,8 +154,12 @@ def get_steam_free_games():
 
                     is_temporary_free = False
                     try:
-                        if final is not None and initial is not None:
-                            if int(final) == 0 and int(initial) > 0:
+                        if final is not None and initial is not None and int(initial) > 0:
+                            if int(final) == 0:
+                                is_temporary_free = True
+                            elif price_overview.get("discount_percent") == 100:
+                                # บาง promo ของ Steam ส่ง final เท่ากับ initial
+                                # ทั้งที่ final_formatted บอกว่า "Free" (quirk ของ Steam API)
                                 is_temporary_free = True
                     except Exception:
                         is_temporary_free = False
