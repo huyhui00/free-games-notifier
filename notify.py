@@ -1,3 +1,4 @@
+import re
 import requests
 import os
 import sys
@@ -228,6 +229,91 @@ def get_steam_free_games():
         return []
 
 
+# ===================== UBISOFT =====================
+UBISOFT_FREE_GAMES_URL = "https://store.ubisoft.com/us/free-games"
+UBISOFT_TILE_RE = re.compile(
+    r'<div tabindex="0" class="product-tile card.*?<!-- END: \.product-tile -->',
+    re.DOTALL,
+)
+
+
+def _ubisoft_extract(pattern, text, group=1):
+    m = re.search(pattern, text, re.DOTALL)
+    return m.group(group).strip() if m else ""
+
+
+def get_ubisoft_free_games():
+    try:
+        res = requests.get(
+            UBISOFT_FREE_GAMES_URL,
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10,
+        )
+        html = res.text
+        free_games = []
+
+        for tile in UBISOFT_TILE_RE.findall(html):
+            is_freeplay = _ubisoft_extract(r'data-freeplay="(true|false)"', tile) == "true"
+            if not is_freeplay:
+                if DEBUG:
+                    print("[UBISOFT SKIP] not a free offer")
+                continue
+
+            price_sales = _ubisoft_extract(r'<span class="price-sales standard-price">\s*([^\n<]+?)\s*</span>', tile)
+            if price_sales.replace("$", "").replace(",", "").strip() not in ("0.00", "0"):
+                if DEBUG:
+                    print(f"[UBISOFT SKIP] not $0.00 (price={price_sales!r})")
+                continue
+
+            # Permanently free-to-play titles show $0.00 but no original price and
+            # a placeholder end date far in the future - skip those, keep real giveaways.
+            original_price = _ubisoft_extract(r'<span class="price-item">([^<]+)</span>', tile)
+            if not original_price:
+                if DEBUG:
+                    print("[UBISOFT SKIP] no original price (likely permanently free-to-play)")
+                continue
+
+            end_date_str = _ubisoft_extract(r'data-freeofferenddate="([^"]+)"', tile)
+            end_date = ""
+            if end_date_str:
+                try:
+                    dt = datetime.strptime(end_date_str, "%a %b %d %H:%M:%S GMT %Y")
+                    if dt.year > datetime.now().year + 1:
+                        if DEBUG:
+                            print(f"[UBISOFT SKIP] placeholder end date {end_date_str}")
+                        continue
+                    end_date = dt.strftime("%d/%m/%Y")
+                except Exception:
+                    pass
+
+            title = _ubisoft_extract(r'<div class="prod-title">\s*([^\n<]+?)\s*</div>', tile)
+            href = _ubisoft_extract(r'class="thumb-link"[^>]*href="([^"]+)"', tile)
+            if not title or not href:
+                continue
+
+            url_game = "https://store.ubisoft.com" + href.split("?")[0]
+            pid = _ubisoft_extract(r'data-itemid="([^"]+)"', tile)
+            image_url = _ubisoft_extract(r'data-desktop-src="([^"]+)"', tile).replace("&amp;", "&")
+
+            free_games.append({
+                "title": title,
+                "url": url_game,
+                "source": "Ubisoft",
+                "original_price": original_price,
+                "end_date": end_date,
+                "image_url": image_url,
+                "ubisoft_pid": pid,
+                "tags": [],
+                "description": "",
+                "store_url": url_game,
+            })
+
+        return free_games
+    except Exception as e:
+        print(f"Ubisoft error: {e}")
+        return []
+
+
 def load_json(path: Path):
     try:
         if path.exists():
@@ -285,6 +371,10 @@ def get_game_id(game: dict):
         appid = game.get("appid") or game.get("url", "").split("/app/")[-1]
         return f"steam:{appid}"
 
+    if game.get("source") == "Ubisoft":
+        pid = game.get("ubisoft_pid") or game.get("url", "").rstrip("/").split("/")[-1]
+        return f"ubisoft:{pid}"
+
     return f"other:{game.get('title','')}-{game.get('url','')}"
 
 
@@ -307,7 +397,8 @@ def get_game_id_variants(game: dict):
 # ===================== DISCORD =====================
 def build_embed(game):
     is_epic = game["source"] == "Epic Games"
-    color = 0x1D9E75 if is_epic else 0x1B2838
+    is_ubisoft = game["source"] == "Ubisoft"
+    color = 0x1D9E75 if is_epic else (0x0070FF if is_ubisoft else 0x1B2838)
 
     price_str = game.get("original_price", "N/A")
     end_date = game.get("end_date", "")
@@ -326,7 +417,7 @@ def build_embed(game):
         info_parts.append(f"  {score} ★")
     info_line = "  ".join(info_parts)
 
-    if is_epic:
+    if is_epic or is_ubisoft:
         links_line = f"[Open in browser ↗]({game['url']})"
     else:
         appid = game.get("appid", "")
@@ -367,6 +458,8 @@ def build_embed(game):
 
     if is_epic:
         embed["thumbnail"] = {"url": "https://upload.wikimedia.org/wikipedia/commons/3/31/Epic_Games_logo.svg"}
+    elif is_ubisoft:
+        embed["thumbnail"] = {"url": "https://upload.wikimedia.org/wikipedia/commons/7/78/Ubisoft_logo.svg"}
     else:
         embed["thumbnail"] = {"url": "https://store.steampowered.com/favicon.ico"}
 
@@ -472,8 +565,9 @@ if __name__ == "__main__":
         print(f"[{datetime.now().isoformat()}] ตรวจสอบเกมฟรี...")
         epic = get_epic_free_games()
         steam = get_steam_free_games()
-        all_games = epic + steam
-        print(f"พบ Epic: {len(epic)} เกม, Steam: {len(steam)} เกม")
+        ubisoft = get_ubisoft_free_games()
+        all_games = epic + steam + ubisoft
+        print(f"พบ Epic: {len(epic)} เกม, Steam: {len(steam)} เกม, Ubisoft: {len(ubisoft)} เกม")
 
         notified_ids = set(notified.get("ids", []))
         new_games = []
